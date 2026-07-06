@@ -72,7 +72,7 @@ JWT_SECRET=some-long-random-string
 4. Replace `[YOUR-PASSWORD]` in the string with your actual database password (set when the project was created, or resettable from that same settings page)
 
 **How to generate `JWT_SECRET`:**
-Any long random string works. Quick way to generate one:
+Any long random string works. Quick way to generate one:(fhfjdsbfhjdbfhshsvvdsvdgsihsjb)
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
