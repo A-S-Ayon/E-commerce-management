@@ -47,3 +47,6 @@ def generate_invoice_pdf(order: dict, items: list[dict], invoice_number: str) ->
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
+
+
+#just checking some of git
