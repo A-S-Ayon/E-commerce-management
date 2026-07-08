@@ -10,5 +10,8 @@ async def init_db_pool():
 async def close_db_pool():
     await pool.close()
 
+
 def get_pool() -> asyncpg.Pool:
+    if pool is None:
+        raise RuntimeError("Database pool not initialized. Did lifespan startup run?")
     return pool

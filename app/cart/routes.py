@@ -53,3 +53,5 @@ async def delete_cart_item(product_id: int, current_user: dict = Depends(get_cur
         if result == "DELETE 0":
             raise HTTPException(404, "Item not in cart")
     return None
+
+    

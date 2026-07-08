@@ -10,29 +10,11 @@ from app.orders.queries import list_all_orders
 from app.orders.schemas import AdminOrderOut
 from fastapi import Response
 from app.invoices.pdf import generate_invoice_pdf
-
+from app.orders.schemas import CheckoutRequest
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
-
-@router.post("/checkout", response_model=OrderOut, status_code=201)
-async def checkout(current_user: dict = Depends(get_current_user)):
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        try:
-            order_id = await run_checkout(conn, current_user["user_id"])
-        except asyncpg.PostgresError as e:
-            raise HTTPException(400, str(e))
-
-        order, items, invoice = await get_order_with_items(conn, order_id)
-
-    return {
-        **dict(order),
-        "user_id": str(order["user_id"]),
-        "items": [dict(i) for i in items],
-        "invoice_number": invoice["invoice_number"] if invoice else None,
-    }
 
 
 @router.get("", response_model=list[OrderSummary])
@@ -96,3 +78,23 @@ async def download_invoice(order_id: int, current_user: dict = Depends(get_curre
             "Content-Disposition": f'attachment; filename="{invoice["invoice_number"]}.pdf"'
         },
     )
+
+
+
+@router.post("/checkout", response_model=OrderOut, status_code=201)
+async def checkout(payload: CheckoutRequest, current_user: dict = Depends(get_current_user)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        try:
+            order_id = await run_checkout(conn, current_user["user_id"], payload.address_id)
+        except asyncpg.PostgresError as e:
+            raise HTTPException(400, str(e))
+
+        order, items, invoice = await get_order_with_items(conn, order_id)
+
+    return {
+        **dict(order),
+        "user_id": str(order["user_id"]),
+        "items": [dict(i) for i in items],
+        "invoice_number": invoice["invoice_number"] if invoice else None,
+    }

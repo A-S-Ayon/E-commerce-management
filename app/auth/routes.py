@@ -15,6 +15,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def read_current_user(current_user: dict = Depends(get_current_user)):
     return current_user
 
+
 @router.post("/signup", response_model=TokenResponse)
 async def signup(payload: SignupRequest):
     pool = get_pool()
@@ -29,6 +30,7 @@ async def signup(payload: SignupRequest):
 
     token = create_access_token(user["id"], user["role_id"])
     return TokenResponse(access_token=token)
+
 
 
 @router.post("/login", response_model=TokenResponse)

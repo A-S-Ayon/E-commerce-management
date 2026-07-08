@@ -8,15 +8,6 @@ class OrderItemOut(BaseModel):
     unit_price: float
     line_total: float
 
-class OrderOut(BaseModel):
-    id: int
-    user_id: str
-    total_amount: float
-    status: str
-    created_at: datetime
-    items: list[OrderItemOut]
-    invoice_number: str | None
-
 class OrderSummary(BaseModel):
     id: int
     total_amount: float
@@ -32,3 +23,23 @@ class AdminOrderOut(BaseModel):
     total_amount: float
     status: str
     created_at: datetime
+
+class CheckoutRequest(BaseModel):
+    address_id: int
+
+class OrderOut(BaseModel):
+    id: int
+    user_id: str
+    total_amount: float
+    status: str
+    created_at: datetime
+    recipient_name: str | None
+    phone: str | None
+    address_line1: str | None
+    address_line2: str | None
+    city: str | None
+    state: str | None
+    postal_code: str | None
+    country: str | None
+    items: list[OrderItemOut]
+    invoice_number: str | None

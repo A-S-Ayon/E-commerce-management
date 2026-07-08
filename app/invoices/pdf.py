@@ -19,6 +19,24 @@ def generate_invoice_pdf(order: dict, items: list[dict], invoice_number: str) ->
     elements.append(Paragraph(f"Status: {order['status']}", styles["Normal"]))
     elements.append(Spacer(1, 16))
 
+    # Shipping address block — snapshotted on the order at checkout time
+    elements.append(Paragraph("Ship To", styles["Heading3"]))
+    if order.get("recipient_name"):
+        elements.append(Paragraph(order["recipient_name"], styles["Normal"]))
+        if order.get("phone"):
+            elements.append(Paragraph(order["phone"], styles["Normal"]))
+        elements.append(Paragraph(order["address_line1"], styles["Normal"]))
+        if order.get("address_line2"):
+            elements.append(Paragraph(order["address_line2"], styles["Normal"]))
+        city_line = ", ".join(
+            filter(None, [order.get("city"), order.get("state"), order.get("postal_code")])
+        )
+        elements.append(Paragraph(city_line, styles["Normal"]))
+        elements.append(Paragraph(order.get("country") or "", styles["Normal"]))
+    else:
+        elements.append(Paragraph("No address on file", styles["Normal"]))
+    elements.append(Spacer(1, 16))
+
     table_data = [["Product", "Qty", "Unit Price", "Line Total"]]
     for item in items:
         table_data.append([
@@ -47,6 +65,3 @@ def generate_invoice_pdf(order: dict, items: list[dict], invoice_number: str) ->
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
-
-
-#just checking some of git

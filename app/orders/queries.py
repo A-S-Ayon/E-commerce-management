@@ -1,13 +1,20 @@
 import asyncpg
 
-async def run_checkout(conn: asyncpg.Connection, user_id: str) -> int:
-    row = await conn.fetchrow("SELECT checkout($1) AS order_id", user_id)
+async def run_checkout(conn: asyncpg.Connection, user_id: str, address_id: int) -> int:
+    row = await conn.fetchrow(
+        "SELECT checkout($1, $2) AS order_id", user_id, address_id
+    )
     return row["order_id"]
 
 
 async def get_order_with_items(conn: asyncpg.Connection, order_id: int):
     order = await conn.fetchrow(
-        "SELECT id, user_id, total_amount, status, created_at FROM shop_orders WHERE id = $1",
+        """
+        SELECT id, user_id, total_amount, status, created_at,
+               recipient_name, phone, address_line1, address_line2,
+               city, state, postal_code, country
+        FROM shop_orders WHERE id = $1
+        """,
         order_id,
     )
     items = await conn.fetch(
