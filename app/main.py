@@ -9,7 +9,7 @@ from app.orders.routes import router as orders_router
 from app.wallet.routes import router as wallet_router
 from app.addresses.routes import router as addresses_router
 from app.reviews.routes import router as reviews_router
-
+from app.wishlist.routes import router as wishlist_router
 
 
 @asynccontextmanager
@@ -35,3 +35,4 @@ app.include_router(orders_router)
 app.include_router(wallet_router)
 app.include_router(addresses_router)
 app.include_router(reviews_router)
+app.include_router(wishlist_router)
