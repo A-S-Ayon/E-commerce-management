@@ -24,5 +24,3 @@ def decode_access_token(token: str) -> dict:
     return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
 
-print("password hashing for string pokemon is", hash_password("pokemon"))
-print("password verification for string pokemon is", verify_password("pokemon", hash_password("pokemon")))
