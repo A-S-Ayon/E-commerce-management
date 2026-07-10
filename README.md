@@ -188,4 +188,5 @@ Built as a focused demonstration of relational database design under a real time
 
 ## Author
 
-Built by [Your Name] as a full-stack database systems project, extended well beyond its original course scope to include email verification, PDF invoicing, trigger-enforced reviews, and a full vanilla-JS frontend.
+1.Animesh Singha Ayon(Backend developer)
+2.Soumik dev(Frontend developer)
