@@ -15,7 +15,7 @@ app = FastAPI(lifespan=lifespan)
 # ── CORS middleware goes here, right after app is created ──
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://ecommerce-frontend-zeta-lime.vercel.app"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
