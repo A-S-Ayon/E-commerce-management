@@ -1,159 +1,191 @@
-# E-Commerce Backend
+# E-Commerce Backend — FastAPI + PostgreSQL (Raw SQL)
 
-A database-focused e-commerce backend built for a DBMS course project. Deliberately avoids an ORM — all queries are raw SQL via `asyncpg` — to showcase stored procedures, transactions, row locking, and normalized schema design directly.
+A full-stack e-commerce platform built to demonstrate database design and backend engineering fundamentals — no ORM, hand-written SQL throughout, with a transactional checkout system that uses row-level locking to guarantee correctness under concurrent load.
+
+**Live demo:** [ecommerce-frontend-zeta-lime.vercel.app](https://ecommerce-frontend-zeta-lime.vercel.app)
+**API docs (Swagger):** `<your-render-url>/docs`
+
+---
+
+## Why no ORM
+
+This project intentionally uses `asyncpg` with raw parameterized SQL instead of SQLAlchemy or any ORM. The goal was to demonstrate direct command of relational database design — schema normalization, constraints, indexing, stored procedures, triggers, and transaction control — rather than relying on an abstraction layer to generate queries. Every query in this codebase was written and reasoned about by hand.
+
+---
 
 ## Tech Stack
 
-- **FastAPI** — web framework
-- **asyncpg** — async PostgreSQL driver (no ORM)
-- **Supabase** — hosted PostgreSQL database
-- **uv** — Python package/project manager
-- **JWT (python-jose)** — authentication
-- **bcrypt / passlib** — password hashing
-- **reportlab** — PDF invoice generation
-
-Core business logic (checkout) runs as a PostgreSQL stored procedure (`checkout()`), called from the API as a single query. This keeps stock validation, wallet debit, order creation, and cart clearing atomic — if anything fails, the whole transaction rolls back.
-
----
-
-## Project Structure
-
-```
-app/
-├── main.py              # FastAPI app, router registration, lifespan (DB pool)
-├── db.py                # asyncpg connection pool
-├── config.py             # env var loading (pydantic-settings)
-├── auth/                 # signup, login, JWT, role-check dependencies
-├── products/              # public product/category browsing + admin CRUD
-├── cart/                  # cart item management
-├── wallet/                # wallet balance, transactions, admin credit
-└── orders/                # checkout, order history, admin order view, invoice PDF
-```
-
-Each domain folder follows the same pattern: `queries.py` (raw SQL), `schemas.py` (Pydantic models), `routes.py` (FastAPI endpoints).
+| Layer | Choice |
+|---|---|
+| API framework | FastAPI |
+| Database driver | asyncpg (async, no ORM) |
+| Database | PostgreSQL (hosted on Supabase) |
+| Auth | JWT (python-jose) + bcrypt password hashing |
+| Email | Brevo HTTP API (transactional email) |
+| PDF generation | ReportLab |
+| Package management | uv |
+| Deployment | Render |
 
 ---
 
-## Setup
+## Architecture Highlights
 
-### 1. Install dependencies
+### 1. Transactional checkout with row-level locking
 
-This project uses `uv` for dependency management.
+The checkout flow is implemented as a single PostgreSQL stored procedure (`checkout()`), not orchestrated across multiple application-layer calls. This was a deliberate design choice to guarantee atomicity:
 
-```bash
-uv sync
+```sql
+BEGIN
+  → Lock wallet row (FOR UPDATE)
+  → Lock each inventory row (FOR UPDATE)
+  → Validate stock and balance
+  → Debit wallet
+  → Create order + order_items (price snapshot)
+  → Decrement inventory
+  → Create payment + invoice
+  → Snapshot shipping address onto the order
+  → Clear cart
+COMMIT — or ROLLBACK entirely on any failure
 ```
 
-This reads `pyproject.toml` / `uv.lock` and creates a `.venv` automatically — you don't need to manually create or activate a virtual environment to run things, since `uv run` handles that for you. If you do want to activate it manually (e.g. for your editor's interpreter):
+The `FOR UPDATE` locks on the wallet and inventory rows prevent two concurrent requests from double-charging a wallet or overselling stock — a classic race condition if checkout were implemented as separate `SELECT` → `UPDATE` calls from the application layer instead of one locked transaction. The FastAPI route calls this procedure as a single query:
 
-**Windows:**
-```bash
-.venv\Scripts\activate
+```sql
+SELECT checkout($1, $2);
 ```
 
-**macOS/Linux:**
-```bash
-source .venv/bin/activate
+Any `RAISE EXCEPTION` inside the procedure (insufficient stock, insufficient balance, empty cart) rolls back every write in the transaction — verified by testing that failed checkouts leave zero trace in orders, wallet balance, or inventory.
+
+### 2. Historical snapshot pattern
+
+Order line items store `unit_price` at time of purchase rather than joining live to `products.price`, and orders store a full snapshotted shipping address rather than a foreign key to a mutable `addresses` row. This ensures order history remains accurate even if a product's price changes or a user edits/deletes an address after the fact — the same pattern used by real payment and fulfillment systems.
+
+### 3. Trigger-enforced business rules
+
+Product reviews are restricted to verified purchasers at the database level, not just in application code:
+
+```sql
+CREATE TRIGGER trg_verified_purchase
+BEFORE INSERT ON shop_reviews
+FOR EACH ROW EXECUTE FUNCTION check_verified_purchase();
 ```
 
-### 2. Environment variables
+This guarantees the rule holds regardless of which client or code path writes to the table.
 
-Create a `.env` file in the project root (same level as `pyproject.toml`):
+### 4. Repository-style query organization
 
-```env
-DATABASE_URL=postgresql://postgres:YOUR_DB_PASSWORD@db.YOUR_PROJECT_REF.supabase.co:5432/postgres
-JWT_SECRET=some-long-random-string
-```
+Each domain (`auth`, `products`, `cart`, `orders`, `wallet`, `reviews`, `addresses`, `wishlist`) has its own `queries.py` acting as a thin repository layer — isolated, parameterized SQL functions that routes call into. This keeps SQL centralized and testable without an ORM's model layer.
 
-**How to get `DATABASE_URL`:**
-1. Go to your project on [supabase.com](https://supabase.com)
-2. **Project Settings → Database → Connection string**
-3. Choose the **Direct connection** URI (port 5432) — this is the format `asyncpg` expects
-4. Replace `[YOUR-PASSWORD]` in the string with your actual database password (set when the project was created, or resettable from that same settings page)
+### 5. Connection pooling via lifespan
 
-**How to generate `JWT_SECRET`:**
-Any long random string works. Quick way to generate one:(fhfjdsbfhjdbfhshsvvdsvdgsihsjb)
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
-```
-
-Never commit `.env` to version control.
-
-### 3. Run the server
-
-```bash
-uv run uvicorn app.main:app --reload
-```
-
-Server runs at `http://localhost:8000`. Interactive API docs (Swagger UI) at `http://localhost:8000/docs`.
+A single `asyncpg` connection pool is created on app startup and closed on shutdown using FastAPI's `lifespan` context manager, avoiding per-request connection overhead.
 
 ---
 
-## Authentication (for frontend integration)
+## Database Schema
 
-- **Signup:** `POST /auth/signup` — body `{name, email, password}` → returns `{access_token, token_type}`. Automatically creates a wallet (balance 0) for the new user.
-- **Login:** `POST /auth/login` — body `{email, password}` → returns `{access_token, token_type}`.
-- **Using the token:** send it on every protected request as a header:
-  ```
-  Authorization: Bearer <access_token>
-  ```
-- **Current user:** `GET /auth/me` — returns `{user_id, role_id}` from the token. Useful to check who's logged in and their role.
+14+ tables covering the full commerce lifecycle:
 
-**Roles:** `role_id = 1` is Admin, `role_id = 2` is Customer (from `shop_roles` seed data). All new signups are Customers; there's no self-serve admin signup — admin status is set directly in the database.
+`shop_users`, `shop_roles`, `shop_products`, `shop_categories`, `shop_inventory`, `shop_wallets`, `shop_wallet_transactions`, `shop_carts`, `shop_cart_items`, `shop_orders`, `shop_order_items`, `shop_payments`, `shop_invoices`, `shop_addresses`, `shop_reviews`, `shop_wishlist`, `shop_audit_logs`, `shop_verification_codes`, `shop_password_resets`
 
-Tokens expire after 24 hours (`JWT_EXPIRE_MINUTES` in `config.py`). There's no refresh-token flow yet — the frontend should redirect to login on a `401` response.
+Key relational design elements:
+- Primary/foreign keys with `ON DELETE CASCADE` where appropriate
+- `CHECK` constraints for data integrity (e.g. `price > 0`, `rating BETWEEN 1 AND 5`, `quantity >= 0`)
+- `UNIQUE` constraints enforcing business rules (one review per user per product, one cart item row per product)
+- Indexes on frequently filtered/joined columns (`category_id`, `user_id`, `order_id`, etc.)
+- ENUM types for constrained status fields (`order_status`, `payment_status`, `wallet_tx_type`)
+
+The full schema is in [`schema.sql`](./schema.sql).
+
+---
+
+## Features
+
+- **Auth**: signup with email verification (6-digit code via email), JWT login, password reset via emailed token, role-based access control (Customer / Admin)
+- **Catalog**: categories, products with stock tracking, admin CRUD
+- **Cart**: add/update/remove items with upsert-on-duplicate logic
+- **Wallet**: balance tracking, admin credit (stand-in for a payment gateway), transaction history
+- **Checkout**: atomic stored-procedure transaction with locking (see above)
+- **Orders**: order history, full order detail with shipping snapshot, admin order visibility
+- **Invoices**: server-generated PDF invoices with itemized breakdown and shipping address, built fresh from live data on every request
+- **Reviews**: 1–5 star ratings, verified-purchase enforcement via trigger, product rating aggregation
+- **Wishlist**: save products for later
+- **Addresses**: multiple shipping addresses per user, default address support
+- **Audit logging**: admin actions (product changes, wallet credits) are logged
 
 ---
 
 ## API Overview
 
-### Public (no auth required)
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health/db` | Sanity check — returns product count |
-| GET | `/categories` | List all categories |
-| GET | `/products` | List active products (optional `?category_id=`) |
-| GET | `/products/{id}` | Single product detail |
+Full interactive documentation is available at `/docs` (Swagger UI) once running. Endpoint groups:
 
-### Customer (requires `Authorization: Bearer <token>`)
-| Method | Path | Description |
-|---|---|---|
-| GET | `/cart` | View current cart with line totals |
-| POST | `/cart/items` | Add item — `{product_id, quantity}` (upserts) |
-| PUT | `/cart/items/{product_id}` | Update quantity |
-| DELETE | `/cart/items/{product_id}` | Remove item |
-| GET | `/wallet` | Current balance |
-| GET | `/wallet/transactions` | Wallet transaction history |
-| POST | `/orders/checkout` | Runs the checkout stored procedure — debits wallet, creates order, clears cart |
-| GET | `/orders` | Current user's order history |
-| GET | `/orders/{id}` | Single order detail with items |
-| GET | `/orders/{id}/invoice` | Downloads a PDF invoice for the order |
-
-### Admin only (requires `role_id = 1` token)
-| Method | Path | Description |
-|---|---|---|
-| POST | `/products` | Create product |
-| PUT | `/products/{id}` | Update product |
-| PATCH | `/products/{id}/stock` | Set inventory quantity |
-| POST | `/wallet/credit` | Credit any user's wallet — `{user_id, amount}` |
-| GET | `/orders/admin/all` | View all orders across all customers (optional `?status=`) |
-
-All admin actions (product create/update, stock changes, wallet credits) are logged to `shop_audit_logs`.
+| Prefix | Purpose |
+|---|---|
+| `/auth` | signup, email verification, login, password reset |
+| `/products`, `/categories` | catalog browsing + admin CRUD |
+| `/cart` | cart management |
+| `/wallet` | balance, transactions, admin credit |
+| `/addresses` | shipping address management |
+| `/orders` | checkout, order history, invoice PDF, admin order view |
+| `/reviews` | product reviews + rating summaries |
+| `/wishlist` | saved products |
 
 ---
 
-## Notes for Frontend Dev
+## Running Locally
 
-- All responses are JSON except `/orders/{id}/invoice`, which returns a PDF file (`Content-Disposition: attachment`) — the browser will trigger a download automatically when hit directly, or you can fetch it as a blob and create a download link programmatically.
-- Money fields (`price`, `balance`, `total_amount`, etc.) are returned as JSON numbers (floats), sourced from Postgres `NUMERIC` columns.
-- `user_id` fields are UUID strings (e.g. `"90e44b53-6cb2-44dd-b344-72388a305c2c"`).
-- Checkout (`POST /orders/checkout`) can fail with a `400` and a message straight from the database, e.g. `"Cart is empty"`, `"Insufficient stock for product 3"`, `"Insufficient wallet balance"` — surface these directly to the user, they're already human-readable.
-- There's currently no pagination on list endpoints (`/products`, `/orders`, `/orders/admin/all`) — fine for demo-scale data, something to flag if the dataset grows.
+```bash
+# clone and install
+git clone <your-repo-url>
+cd ecommerce-backend
+uv sync
+
+# set up environment variables
+cp .env.example .env   # then fill in real values
+
+# run
+uv run uvicorn app.main:app --reload
+```
+
+Visit `http://localhost:8000/docs` for the interactive API explorer.
+
+### Required environment variables
+
+```
+DATABASE_URL=
+JWT_SECRET=
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=1440
+BREVO_API_KEY=
+MAIL_FROM=
+FRONTEND_RESET_URL=
+```
 
 ---
 
-## Status
+## Deployment
 
-**Implemented:** Auth (JWT), product/category browsing, admin product CRUD, cart, wallet + admin credit, checkout (transactional stored procedure with row locking), admin order view, PDF invoices, audit logging.
+- **Backend**: Render (Docker/Python web service)
+- **Database**: Supabase (managed PostgreSQL)
+- **Email**: Brevo (HTTP API — chosen specifically because most cloud hosts, including Render's free tier, block outbound SMTP ports 25/465/587; an HTTPS-based email API avoids that restriction entirely)
+- **Frontend**: static HTML/CSS/JS hosted on Vercel
 
-**Planned next:** Shipping addresses (snapshotted per order), product reviews (verified-purchase only, trigger-enforced).
+---
+
+## Known Limitations / Future Work
+
+Built as a focused demonstration of relational database design under a real time constraint — the following are deliberately out of scope for now:
+
+- Single short-lived JWT (no refresh token rotation)
+- Bearer token stored client-side rather than HttpOnly cookies
+- No OAuth (Google Sign-In) support
+- No MFA/TOTP for admin accounts
+- No rate limiting on auth endpoints
+- No pagination on list endpoints (fine at current scale; would need it at production scale)
+- No automated test suite (checkout transaction behavior was verified manually, including rollback-on-failure scenarios)
+
+---
+
+## Author
+
+Built by [Your Name] as a full-stack database systems project, extended well beyond its original course scope to include email verification, PDF invoicing, trigger-enforced reviews, and a full vanilla-JS frontend.
