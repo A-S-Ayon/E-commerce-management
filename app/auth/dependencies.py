@@ -26,7 +26,7 @@ async def get_current_user(
 
 
 async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    if current_user["role_id"] != 1:
+    if current_user["role_id"] != 3:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
