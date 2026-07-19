@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from datetime import datetime
-
 class OrderItemOut(BaseModel):
     product_id: int
     name: str
@@ -41,5 +40,26 @@ class OrderOut(BaseModel):
     state: str | None
     postal_code: str | None
     country: str | None
+    fulfillment_status: str | None
+    fulfillment_updated_at: datetime | None
+    received_confirmed_at: datetime | None
     items: list[OrderItemOut]
     invoice_number: str | None
+
+
+class FulfillmentUpdate(BaseModel):
+    status: str  # "Shipped" | "Out for Delivery" | "Delivered"
+
+class FulfillmentOut(BaseModel):
+    id: int
+    fulfillment_status: str | None
+    fulfillment_updated_at: datetime | None
+
+class ReceiptConfirmOut(BaseModel):
+    id: int
+    received_confirmed_at: datetime
+
+class StatusHistoryOut(BaseModel):
+    status: str
+    changed_at: datetime
+    changed_by_name: str | None
