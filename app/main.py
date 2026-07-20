@@ -13,10 +13,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # ── CORS middleware goes here, right after app is created ──
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ecommerce-frontend-zeta-lime.vercel.app"],
-    allow_credentials=False,
+    allow_origins=[
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "https://frontend-shop-mauve.vercel.app",  # ← add this
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
