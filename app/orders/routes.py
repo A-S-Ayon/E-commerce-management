@@ -11,6 +11,11 @@ from app.orders.schemas import AdminOrderOut
 from fastapi import Response
 from app.invoices.pdf import generate_invoice_pdf
 from app.orders.schemas import CheckoutRequest
+from app.auth.dependencies import require_admin
+from app.orders.queries import update_fulfillment_status, confirm_receipt, get_status_history
+from app.orders.schemas import FulfillmentUpdate, FulfillmentOut, ReceiptConfirmOut, StatusHistoryOut
+
+
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -98,3 +103,37 @@ async def checkout(payload: CheckoutRequest, current_user: dict = Depends(get_cu
         "items": [dict(i) for i in items],
         "invoice_number": invoice["invoice_number"] if invoice else None,
     }
+
+@router.patch("/{order_id}/fulfillment", response_model=FulfillmentOut)
+async def update_order_fulfillment(
+    order_id: int, payload: FulfillmentUpdate, admin: dict = Depends(require_admin)
+):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        updated, error = await update_fulfillment_status(
+            conn, order_id, payload.status, admin["user_id"]
+        )
+        if error:
+            raise HTTPException(400, error)
+    return dict(updated)
+
+
+@router.post("/{order_id}/confirm-receipt", response_model=ReceiptConfirmOut)
+async def confirm_order_receipt(order_id: int, current_user: dict = Depends(get_current_user)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        updated, error = await confirm_receipt(conn, order_id, current_user["user_id"])
+        if error:
+            raise HTTPException(400, error)
+    return dict(updated)
+
+
+@router.get("/{order_id}/status-history", response_model=list[StatusHistoryOut])
+async def get_order_status_history(order_id: int, current_user: dict = Depends(get_current_user)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow("SELECT user_id FROM shop_orders WHERE id = $1", order_id)
+        if not order or (str(order["user_id"]) != current_user["user_id"] and current_user["role_id"] != 1):
+            raise HTTPException(404, "Order not found")
+        rows = await get_status_history(conn, order_id)
+    return [dict(r) for r in rows]
