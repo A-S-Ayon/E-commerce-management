@@ -204,5 +204,5 @@ Built as a focused demonstration of relational database design under a real time
 
 ## Author
 
-1. Animesh Singha Ayon (Backend developer)
-2. Soumik Dev (Frontend developer)
+1. Animesh Singha Ayon (Backend developer) 51% 
+2. Soumik Dev (Frontend developer) 49%
