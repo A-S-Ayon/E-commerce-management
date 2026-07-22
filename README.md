@@ -25,6 +25,7 @@ This project intentionally uses `asyncpg` with raw parameterized SQL instead of 
 | PDF generation | ReportLab |
 | Package management | uv |
 | Deployment | Render |
+| Conversational assistant | LangGraph + Telegram (separate service) |
 
 ---
 
@@ -62,7 +63,9 @@ Order line items store `unit_price` at time of purchase rather than joining live
 
 ### 3. Trigger-enforced business rules
 
-Product reviews are restricted to verified purchasers at the database level, not just in application code:
+Two independent business rules are enforced at the database level rather than in application code, so they hold regardless of which client or code path writes to the tables:
+
+**Verified-purchase reviews** — a customer can only review a product they've actually bought:
 
 ```sql
 CREATE TRIGGER trg_verified_purchase
@@ -70,7 +73,15 @@ BEFORE INSERT ON shop_reviews
 FOR EACH ROW EXECUTE FUNCTION check_verified_purchase();
 ```
 
-This guarantees the rule holds regardless of which client or code path writes to the table.
+**Sequential order fulfillment** — an order's fulfillment status can only move forward one step at a time (`Shipped → Out for Delivery → Delivered`), never skipped or reversed. A `BEFORE UPDATE` trigger validates the transition, stamps the update timestamp, and writes an entry to a status history table automatically — all inside the same trigger, so no code path can update the status without the audit trail being created:
+
+```sql
+CREATE TRIGGER trg_log_fulfillment_status
+BEFORE UPDATE ON shop_orders
+FOR EACH ROW EXECUTE FUNCTION log_fulfillment_status_change();
+```
+
+Tested by attempting an invalid transition directly via SQL (bypassing the API entirely) — the trigger rejects it the same way the API does, confirming the guarantee lives in the database, not just the route handler.
 
 ### 4. Repository-style query organization
 
@@ -84,16 +95,16 @@ A single `asyncpg` connection pool is created on app startup and closed on shutd
 
 ## Database Schema
 
-14+ tables covering the full commerce lifecycle:
+15+ tables covering the full commerce lifecycle:
 
-`shop_users`, `shop_roles`, `shop_products`, `shop_categories`, `shop_inventory`, `shop_wallets`, `shop_wallet_transactions`, `shop_carts`, `shop_cart_items`, `shop_orders`, `shop_order_items`, `shop_payments`, `shop_invoices`, `shop_addresses`, `shop_reviews`, `shop_wishlist`, `shop_audit_logs`, `shop_verification_codes`, `shop_password_resets`
+`shop_users`, `shop_roles`, `shop_products`, `shop_categories`, `shop_inventory`, `shop_wallets`, `shop_wallet_transactions`, `shop_carts`, `shop_cart_items`, `shop_orders`, `shop_order_items`, `shop_payments`, `shop_invoices`, `shop_addresses`, `shop_reviews`, `shop_wishlist`, `shop_audit_logs`, `shop_verification_codes`, `shop_password_resets`, `shop_order_status_history`
 
 Key relational design elements:
 - Primary/foreign keys with `ON DELETE CASCADE` where appropriate
 - `CHECK` constraints for data integrity (e.g. `price > 0`, `rating BETWEEN 1 AND 5`, `quantity >= 0`)
 - `UNIQUE` constraints enforcing business rules (one review per user per product, one cart item row per product)
 - Indexes on frequently filtered/joined columns (`category_id`, `user_id`, `order_id`, etc.)
-- ENUM types for constrained status fields (`order_status`, `payment_status`, `wallet_tx_type`)
+- ENUM types for constrained status fields (`order_status`, `payment_status`, `wallet_tx_type`, `fulfillment_status`)
 
 The full schema is in [`schema.sql`](./schema.sql).
 
@@ -107,11 +118,14 @@ The full schema is in [`schema.sql`](./schema.sql).
 - **Wallet**: balance tracking, admin credit (stand-in for a payment gateway), transaction history
 - **Checkout**: atomic stored-procedure transaction with locking (see above)
 - **Orders**: order history, full order detail with shipping snapshot, admin order visibility
+- **Fulfillment tracking**: admin-driven Shipped → Out for Delivery → Delivered progression, enforced sequentially by a database trigger, with full status history
+- **Receipt confirmation**: customer can confirm receipt of an order only once it's marked Delivered
 - **Invoices**: server-generated PDF invoices with itemized breakdown and shipping address, built fresh from live data on every request
 - **Reviews**: 1–5 star ratings, verified-purchase enforcement via trigger, product rating aggregation
 - **Wishlist**: save products for later
 - **Addresses**: multiple shipping addresses per user, default address support
 - **Audit logging**: admin actions (product changes, wallet credits) are logged
+- **Telegram assistant**: a LangGraph-based bot that answers product availability questions by querying `shop_products`/`shop_inventory` directly, plus RAG-based answers over ingested store policy documents
 
 ---
 
@@ -126,7 +140,7 @@ Full interactive documentation is available at `/docs` (Swagger UI) once running
 | `/cart` | cart management |
 | `/wallet` | balance, transactions, admin credit |
 | `/addresses` | shipping address management |
-| `/orders` | checkout, order history, invoice PDF, admin order view |
+| `/orders` | checkout, order history, fulfillment status, receipt confirmation, invoice PDF, admin order view |
 | `/reviews` | product reviews + rating summaries |
 | `/wishlist` | saved products |
 
@@ -182,11 +196,13 @@ Built as a focused demonstration of relational database design under a real time
 - No MFA/TOTP for admin accounts
 - No rate limiting on auth endpoints
 - No pagination on list endpoints (fine at current scale; would need it at production scale)
-- No automated test suite (checkout transaction behavior was verified manually, including rollback-on-failure scenarios)
+- No automated test suite (checkout and fulfillment transaction behavior were verified manually, including rollback-on-failure and invalid-transition scenarios)
+- An admin can currently place, fulfill, and confirm receipt of their own order with no conflict-of-interest check
+- No order cancellation/refund flow, despite `order_status` including a `Cancelled` state
 
 ---
 
 ## Author
 
-1.Animesh Singha Ayon(Backend developer)
-2.Soumik dev(Frontend developer)
+1. Animesh Singha Ayon (Backend developer)
+2. Soumik Dev (Frontend developer)
