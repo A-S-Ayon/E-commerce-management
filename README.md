@@ -2,7 +2,7 @@
 
 A full-stack e-commerce platform built to demonstrate database design and backend engineering fundamentals — no ORM, hand-written SQL throughout, with a transactional checkout system that uses row-level locking to guarantee correctness under concurrent load.
 
-**Live demo:** [ecommerce-frontend-zeta-lime.vercel.app](https://ecommerce-frontend-zeta-lime.vercel.app)
+**Live demo:** [ecommerce-frontend-zeta-lime.vercel.app](https://e-commerce-management-lhdp.onrender.com)
 **API docs (Swagger):** `<your-render-url>/docs`
 
 ---
@@ -204,5 +204,5 @@ Built as a focused demonstration of relational database design under a real time
 
 ## Author
 
-1. Animesh Singha Ayon (Backend developer) 51% 
-2. Soumik Dev (Frontend developer) 49%
+1. Animesh Singha Ayon (Backend developer)
+2. Soumik Dev (Frontend developer)
