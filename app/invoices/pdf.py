@@ -17,6 +17,13 @@ def generate_invoice_pdf(order: dict, items: list[dict], invoice_number: str) ->
     elements.append(Paragraph(f"Order ID: {order['id']}", styles["Normal"]))
     elements.append(Paragraph(f"Date: {order['created_at'].strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
     elements.append(Paragraph(f"Status: {order['status']}", styles["Normal"]))
+    if order.get("customer_name"):
+        elements.append(Paragraph(f"Customer: {order['customer_name']} ({order.get('customer_email', '')})", styles["Normal"]))
+    if order.get("estimated_delivery_min") and order.get("estimated_delivery_max"):
+        elements.append(Paragraph(
+            f"Estimated delivery: {order['estimated_delivery_min'].strftime('%b %d')} – {order['estimated_delivery_max'].strftime('%b %d, %Y')}",
+            styles["Normal"],
+        ))
     elements.append(Spacer(1, 16))
 
     # Shipping address block — snapshotted on the order at checkout time

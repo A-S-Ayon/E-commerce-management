@@ -1,20 +1,20 @@
 -- =========================================================
--- E-commerce database schema — consolidated
--- All tables, types, indexes, triggers, and stored procedures
--- Run this once against a fresh PostgreSQL/Supabase database.
+-- ShopX E-Commerce Database Schema
+-- Consolidated final version — Supabase project djfqjyqipvbncvltjvml
 -- =========================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- required for GIN trigram index on product name
+CREATE EXTENSION IF NOT EXISTS pg_trgm; -- used by trigram index on product name search
 
 -- =========================================================
 -- ENUM TYPES
 -- =========================================================
 
-CREATE TYPE order_status   AS ENUM ('Pending', 'Paid', 'Cancelled');
-CREATE TYPE payment_status AS ENUM ('Success', 'Failed');
-CREATE TYPE payment_method AS ENUM ('Wallet');
-CREATE TYPE wallet_tx_type AS ENUM ('Credit', 'Debit');
+CREATE TYPE order_status        AS ENUM ('Pending', 'Paid', 'Cancelled');
+CREATE TYPE payment_status      AS ENUM ('Success', 'Failed');
+CREATE TYPE payment_method      AS ENUM ('Wallet');
+CREATE TYPE wallet_tx_type      AS ENUM ('Credit', 'Debit');
+CREATE TYPE fulfillment_status  AS ENUM ('Shipped', 'Out for Delivery', 'Delivered');
 
 -- =========================================================
 -- ROLES & USERS
@@ -66,7 +66,7 @@ CREATE TABLE shop_password_resets (
 CREATE INDEX idx_shop_password_resets_token ON shop_password_resets(token);
 
 -- =========================================================
--- CATALOG: CATEGORIES, PRODUCTS, INVENTORY
+-- CATALOG
 -- =========================================================
 
 CREATE TABLE shop_categories (
@@ -133,7 +133,7 @@ CREATE TABLE shop_cart_items (
 CREATE INDEX idx_shop_cart_items_cart_id ON shop_cart_items(cart_id);
 
 -- =========================================================
--- SHIPPING ADDRESSES
+-- ADDRESSES
 -- =========================================================
 
 CREATE TABLE shop_addresses (
@@ -155,28 +155,43 @@ CREATE TABLE shop_addresses (
 CREATE INDEX idx_shop_addresses_user_id ON shop_addresses(user_id);
 
 -- =========================================================
--- ORDERS, ORDER ITEMS, PAYMENTS, INVOICES
--- (orders include a snapshotted shipping address, captured
--- at checkout time — see checkout() below)
+-- ORDERS
+-- Shipping fields are a snapshot of shop_addresses at
+-- checkout time — same reasoning as unit_price snapshot in
+-- shop_order_items: order history must stay accurate even
+-- if the address is later edited or deleted.
+--
+-- fulfillment_status/related columns track post-payment
+-- delivery progress. status_change_actor_id is write-only
+-- scratch space used to pass "who made this change" into
+-- the trg_log_fulfillment_status trigger; it is always
+-- cleared back to NULL by the trigger before the row is
+-- persisted, so it never looks like a persistent "current
+-- owner" column.
 -- =========================================================
 
 CREATE TABLE shop_orders (
-    id             SERIAL PRIMARY KEY,
-    user_id        UUID NOT NULL REFERENCES shop_users(id),
-    total_amount   NUMERIC(12,2) NOT NULL CHECK (total_amount >= 0),
-    status         order_status NOT NULL DEFAULT 'Pending',
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- shipping snapshot (copied from shop_addresses at checkout time;
-    -- never joined live, so order history stays accurate even if the
-    -- address is later edited or deleted)
-    recipient_name VARCHAR(150),
-    phone          VARCHAR(30),
-    address_line1  VARCHAR(255),
-    address_line2  VARCHAR(255),
-    city           VARCHAR(100),
-    state          VARCHAR(100),
-    postal_code    VARCHAR(20),
-    country        VARCHAR(100)
+    id                      SERIAL PRIMARY KEY,
+    user_id                 UUID NOT NULL REFERENCES shop_users(id),
+    total_amount            NUMERIC(12,2) NOT NULL CHECK (total_amount >= 0),
+    status                  order_status NOT NULL DEFAULT 'Pending',
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- shipping snapshot
+    recipient_name          VARCHAR(150),
+    phone                   VARCHAR(30),
+    address_line1           VARCHAR(255),
+    address_line2           VARCHAR(255),
+    city                    VARCHAR(100),
+    state                   VARCHAR(100),
+    postal_code             VARCHAR(20),
+    country                 VARCHAR(100),
+
+    -- fulfillment tracking
+    fulfillment_status      fulfillment_status,
+    fulfillment_updated_at  TIMESTAMPTZ,
+    received_confirmed_at   TIMESTAMPTZ,
+    status_change_actor_id  UUID -- write-only; cleared by trigger, never queried directly
 );
 
 CREATE INDEX idx_shop_orders_user_id ON shop_orders(user_id);
@@ -190,6 +205,20 @@ CREATE TABLE shop_order_items (
 );
 
 CREATE INDEX idx_shop_order_items_order_id ON shop_order_items(order_id);
+
+CREATE TABLE shop_order_status_history (
+    id         SERIAL PRIMARY KEY,
+    order_id   INT NOT NULL REFERENCES shop_orders(id) ON DELETE CASCADE,
+    status     fulfillment_status NOT NULL,
+    changed_by UUID REFERENCES shop_users(id),
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_shop_order_status_history_order_id ON shop_order_status_history(order_id);
+
+-- =========================================================
+-- PAYMENTS & INVOICES
+-- =========================================================
 
 CREATE TABLE shop_payments (
     id             SERIAL PRIMARY KEY,
@@ -210,7 +239,7 @@ CREATE TABLE shop_invoices (
 );
 
 -- =========================================================
--- REVIEWS (verified-purchase enforced via trigger below)
+-- REVIEWS (verified-purchase enforced via trigger)
 -- =========================================================
 
 CREATE TABLE shop_reviews (
@@ -253,48 +282,14 @@ CREATE TABLE shop_audit_logs (
 CREATE INDEX idx_shop_audit_logs_admin_id ON shop_audit_logs(admin_id);
 
 -- =========================================================
--- TRIGGER FUNCTION: enforce verified-purchase reviews
--- A user may only review a product they have an order_item
--- for, on an order with status = 'Paid'.
--- =========================================================
-
-CREATE OR REPLACE FUNCTION check_verified_purchase()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM shop_order_items oi
-        JOIN shop_orders o ON o.id = oi.order_id
-        WHERE o.user_id = NEW.user_id
-          AND oi.product_id = NEW.product_id
-          AND o.status = 'Paid'
-    ) THEN
-        RAISE EXCEPTION 'You can only review products you have purchased';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_verified_purchase
-BEFORE INSERT ON shop_reviews
-FOR EACH ROW EXECUTE FUNCTION check_verified_purchase();
-
--- =========================================================
--- checkout(): the core transactional stored procedure.
---
--- Validates the user's shipping address, cart contents, stock
--- levels, and wallet balance; then atomically debits the wallet,
--- creates the order (with a snapshotted shipping address and
--- price-snapshotted line items), decrements inventory, records
--- the payment, generates an invoice, and clears the cart.
---
--- FOR UPDATE locks on the wallet row and each inventory row
--- prevent two concurrent checkouts from the same user (or
--- concurrent buyers of the same product) from double-charging
--- a wallet or overselling stock. Any RAISE EXCEPTION rolls back
--- every write made so far in the transaction — verified by
--- testing that a failed checkout leaves zero trace in orders,
--- wallet balance, or inventory.
+-- FUNCTION: checkout()
+-- Validates stock + wallet balance, debits wallet, creates
+-- order/order_items/payment/invoice with the given shipping
+-- address snapshotted onto the order, and clears the cart.
+-- All in one transaction — any RAISE rolls back everything.
+-- FOR UPDATE locks on wallet + inventory rows prevent
+-- concurrent double-charge / oversell. Empty-cart check
+-- prevents a double-submit creating a $0 ghost order.
 -- =========================================================
 
 CREATE OR REPLACE FUNCTION checkout(p_user_id UUID, p_address_id INT)
@@ -309,7 +304,6 @@ DECLARE
     v_stock     INTEGER;
     v_addr      RECORD;
 BEGIN
-    -- Look up and validate the shipping address belongs to this user
     SELECT recipient_name, phone, address_line1, address_line2, city, state, postal_code, country
     INTO v_addr
     FROM shop_addresses
@@ -324,7 +318,6 @@ BEGIN
         RAISE EXCEPTION 'No cart found for user %', p_user_id;
     END IF;
 
-    -- Lock the wallet row to prevent concurrent double-charge
     SELECT id, balance INTO v_wallet_id, v_balance
     FROM shop_wallets WHERE user_id = p_user_id FOR UPDATE;
 
@@ -336,7 +329,6 @@ BEGIN
         RAISE EXCEPTION 'Cart is empty';
     END IF;
 
-    -- First pass: lock inventory rows and validate stock + compute total
     FOR v_item IN
         SELECT ci.product_id, ci.quantity, p.price
         FROM shop_cart_items ci
@@ -357,12 +349,10 @@ BEGIN
         RAISE EXCEPTION 'Insufficient wallet balance';
     END IF;
 
-    -- Debit wallet
     UPDATE shop_wallets SET balance = balance - v_total WHERE id = v_wallet_id;
     INSERT INTO shop_wallet_transactions (wallet_id, amount, type)
     VALUES (v_wallet_id, v_total, 'Debit');
 
-    -- Create order with snapshotted shipping address
     INSERT INTO shop_orders (
         user_id, total_amount, status,
         recipient_name, phone, address_line1, address_line2, city, state, postal_code, country
@@ -374,7 +364,6 @@ BEGIN
     )
     RETURNING id INTO v_order_id;
 
-    -- Second pass: create order_items (price snapshot) and decrement inventory
     FOR v_item IN
         SELECT ci.product_id, ci.quantity, p.price
         FROM shop_cart_items ci
@@ -401,19 +390,95 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- =========================================================
--- SEED DATA (optional — remove or edit before production use)
+-- TRIGGER: verified-purchase enforcement on shop_reviews
+-- A review can only be inserted if the reviewing user has a
+-- Paid order containing the product being reviewed.
 -- =========================================================
 
--- INSERT INTO shop_categories (name) VALUES
---   ('Laptops'), ('Phones'), ('Accessories');
+CREATE OR REPLACE FUNCTION check_verified_purchase()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM shop_order_items oi
+        JOIN shop_orders o ON o.id = oi.order_id
+        WHERE o.user_id = NEW.user_id
+          AND oi.product_id = NEW.product_id
+          AND o.status = 'Paid'
+    ) THEN
+        RAISE EXCEPTION 'You can only review products you have purchased';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_verified_purchase
+BEFORE INSERT ON shop_reviews
+FOR EACH ROW EXECUTE FUNCTION check_verified_purchase();
+
+-- =========================================================
+-- TRIGGER: fulfillment status state machine + audit log
 --
--- INSERT INTO shop_products (category_id, name, description, price, image_url, is_active)
--- VALUES
---   (1, 'ThinkPad X1 Carbon', '14-inch business ultrabook', 1299.00, NULL, TRUE),
---   (1, 'MacBook Air M2', '13-inch, 8GB RAM', 999.00, NULL, TRUE),
---   (2, 'Pixel 8', '128GB, Obsidian', 699.00, NULL, TRUE),
---   (2, 'iPhone 15', '128GB, Blue', 799.00, NULL, TRUE),
---   (3, 'USB-C Hub', '7-in-1 adapter', 39.99, NULL, TRUE);
+-- Runs BEFORE UPDATE (not AFTER) specifically so it can
+-- modify NEW.fulfillment_updated_at before the row is
+-- written — an AFTER trigger cannot change the row being
+-- updated, since the write has already happened by then.
 --
--- INSERT INTO shop_inventory (product_id, quantity)
--- SELECT id, 25 FROM shop_products;
+-- Responsibilities:
+--   1. Enforce forward-only, sequential transitions
+--      (Shipped -> Out for Delivery -> Delivered) at the
+--      DB level. This is defense-in-depth: even a direct
+--      SQL UPDATE bypassing the API cannot skip or reverse
+--      a step.
+--   2. Require the caller to identify who made the change
+--      via status_change_actor_id, so shop_order_status_
+--      history.changed_by is always accurate rather than
+--      possibly stale from a previous update.
+--   3. Log every valid transition to shop_order_status_
+--      history automatically, so history is guaranteed
+--      regardless of which code path performs the update.
+--   4. Stamp fulfillment_updated_at with the current time.
+--   5. Clear status_change_actor_id back to NULL before the
+--      row is persisted, so it never lingers looking like a
+--      real "current owner" column when queried directly.
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION log_fulfillment_status_change()
+RETURNS TRIGGER AS $$
+DECLARE
+    expected fulfillment_status;
+BEGIN
+    IF NEW.fulfillment_status IS DISTINCT FROM OLD.fulfillment_status
+       AND NEW.fulfillment_status IS NOT NULL THEN
+
+        expected := CASE
+            WHEN OLD.fulfillment_status IS NULL THEN 'Shipped'
+            WHEN OLD.fulfillment_status = 'Shipped' THEN 'Out for Delivery'
+            WHEN OLD.fulfillment_status = 'Out for Delivery' THEN 'Delivered'
+            ELSE NULL
+        END;
+
+        IF NEW.fulfillment_status IS DISTINCT FROM expected THEN
+            RAISE EXCEPTION 'Invalid fulfillment transition: % -> % (expected %)',
+                OLD.fulfillment_status, NEW.fulfillment_status, expected;
+        END IF;
+
+        IF NEW.status_change_actor_id IS NULL THEN
+            RAISE EXCEPTION 'status_change_actor_id must be set when changing fulfillment_status';
+        END IF;
+
+        INSERT INTO shop_order_status_history (order_id, status, changed_by)
+        VALUES (NEW.id, NEW.fulfillment_status, NEW.status_change_actor_id);
+
+        NEW.fulfillment_updated_at := NOW();
+    END IF;
+
+    NEW.status_change_actor_id := NULL;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_log_fulfillment_status
+BEFORE UPDATE ON shop_orders
+FOR EACH ROW EXECUTE FUNCTION log_fulfillment_status_change();

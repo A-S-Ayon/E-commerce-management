@@ -14,11 +14,14 @@ from app.orders.schemas import CheckoutRequest
 from app.auth.dependencies import require_admin
 from app.orders.queries import update_fulfillment_status, confirm_receipt, get_status_history
 from app.orders.schemas import FulfillmentUpdate, FulfillmentOut, ReceiptConfirmOut, StatusHistoryOut
+from app.orders.queries import cancel_order_db
+from app.orders.schemas import CancelOrderResponse
+
+
 
 
 
 router = APIRouter(prefix="/orders", tags=["orders"])
-
 
 
 
@@ -137,3 +140,16 @@ async def get_order_status_history(order_id: int, current_user: dict = Depends(g
             raise HTTPException(404, "Order not found")
         rows = await get_status_history(conn, order_id)
     return [dict(r) for r in rows]
+
+
+
+#@routner.post decorator registers the funtion below as a handler for that endpoint
+@router.post("/{order_id}/cancel", response_model=CancelOrderResponse)
+async def cancel_order(order_id: int, current_user: dict = Depends(get_current_user)):
+    pool = get_pool()
+    is_admin = current_user["role_id"] == 3
+    async with pool.acquire() as conn:
+        success, error = await cancel_order_db(conn, order_id, current_user["user_id"], is_admin)
+        if not success:
+            raise HTTPException(400, error)
+    return {"message": f"Order {order_id} has been cancelled"}
