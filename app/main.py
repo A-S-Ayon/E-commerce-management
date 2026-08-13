@@ -55,7 +55,4 @@ app.include_router(orders_router)
 app.include_router(addresses_router)
 app.include_router(reviews_router)
 app.include_router(wishlist_router)
-<<<<<<< HEAD
 app.include_router(analytics_router)
-=======
->>>>>>> 76bba788444b9a4244fd76824ffc87b1701c43bb
