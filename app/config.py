@@ -10,8 +10,11 @@ class Settings(BaseSettings):
     BREVO_API_KEY: str
     MAIL_FROM: str
     FRONTEND_RESET_URL: str = "http://localhost:3000/reset-password"
+    DB_URI: str
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", 
+                                      env_file_encoding="utf-8",
+                                       extra="ignore")
 
 
 settings = Settings()

@@ -9,14 +9,16 @@ async def run_checkout(conn: asyncpg.Connection, user_id: str, address_id: int) 
 
 async def get_order_with_items(conn: asyncpg.Connection, order_id: int):
     order = await conn.fetchrow(
-    """
-    SELECT id, user_id, total_amount, status, created_at,
-           recipient_name, phone, address_line1, address_line2,
-           city, state, postal_code, country,
-           fulfillment_status, fulfillment_updated_at, received_confirmed_at
-    FROM shop_orders WHERE id = $1
-    """,
-    order_id,
+        """
+        SELECT id, user_id, total_amount, status, created_at,
+               recipient_name, phone, address_line1, address_line2,
+               city, state, postal_code, country,
+               fulfillment_status, fulfillment_updated_at, received_confirmed_at,
+               customer_name, customer_email, cancelled_at,
+               estimated_delivery_min, estimated_delivery_max
+        FROM shop_orders WHERE id = $1
+        """,
+        order_id,
     )
     items = await conn.fetch(
         """
@@ -33,6 +35,16 @@ async def get_order_with_items(conn: asyncpg.Connection, order_id: int):
         order_id,
     )
     return order, items, invoice
+
+
+async def cancel_order_db(conn: asyncpg.Connection, order_id: int, user_id: str, is_admin: bool):
+    try:
+        await conn.execute(
+            "SELECT cancel_order($1, $2, $3)", order_id, user_id, is_admin
+        )
+        return True, None
+    except asyncpg.PostgresError as e:
+        return False, str(e)
 
 
 async def list_user_orders(conn: asyncpg.Connection, user_id: str):
