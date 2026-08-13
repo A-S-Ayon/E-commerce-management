@@ -6,8 +6,6 @@ load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SECRET_KEY = os.environ.get("SUPABASE_SECRET_KEY")
 COHERE_API_KEY = os.environ.get("COHERE_API_KEY")
-print(f"SUPABASE_URL: {SUPABASE_URL}")
-print(f"COHERE_API_KEY: {COHERE_API_KEY}")
 CHUNK_SIZE = 200   
 OVERLAP    = 40    
 
