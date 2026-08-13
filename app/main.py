@@ -20,10 +20,16 @@ app = FastAPI(lifespan=lifespan)
 
 
 # ── CORS middleware goes here, right after app is created ──
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ecommerce-frontend-zeta-lime.vercel.app"],
-    allow_credentials=False,
+    allow_origins=[
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "https://frontend-shop-mauve.vercel.app",  # ← add this
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -49,4 +55,7 @@ app.include_router(orders_router)
 app.include_router(addresses_router)
 app.include_router(reviews_router)
 app.include_router(wishlist_router)
+<<<<<<< HEAD
 app.include_router(analytics_router)
+=======
+>>>>>>> 76bba788444b9a4244fd76824ffc87b1701c43bb
