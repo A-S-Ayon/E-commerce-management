@@ -46,7 +46,7 @@ from app.reviews.routes import router as reviews_router
 from app.wishlist.routes import router as wishlist_router
 from app.support.routes import router as support_router
 
-app.include_router(support_router)
+
 app.include_router(support_router)
 app.include_router(auth_router)
 app.include_router(categories_router)
