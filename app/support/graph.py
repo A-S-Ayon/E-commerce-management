@@ -32,7 +32,7 @@ def build_graph_for_user(user_id: str, checkpointer):
     tools = make_tools_for_user(user_id)
     model = llm = ChatFireworks(
     api_key=os.getenv("FIREWORKS_API_KEY"),
-    model="accounts/fireworks/models/minimax-m3",
+    model="accounts/fireworks/models/glm-5p2",
     timeout=30,
     )
     model_with_tools = model.bind_tools(tools)
