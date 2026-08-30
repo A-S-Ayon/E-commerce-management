@@ -30,9 +30,7 @@ app.add_middleware(
     "http://localhost:5500",
     "http://localhost:8000",          # ← add if you use python http.server
     "http://127.0.0.1:8000",          # ← and its 127.0.0.1 twin
-    "https://frontend-shop-mauve.vercel.app",
-    "https://3000-ipyd9rbapz9vqtoizhoug-e611ea41.us4.manus.computer",
-       "https://ecomfront-5269nma3.manus.space"
+    "https://frontend-shopify-psi.vercel.app"
 ],
     allow_credentials=True,
     allow_methods=["*"],
