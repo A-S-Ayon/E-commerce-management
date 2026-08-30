@@ -19,15 +19,26 @@ from app.auth.queries import (
 )
 from app.auth.schemas import VerifyEmailRequest, ResendCodeRequest
 from app.email.mailer import send_verification_email
-
+from app.auth.queries import get_user_by_id
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+
+
 @router.get("/me")
 async def read_current_user(current_user: dict = Depends(get_current_user)):
-    return current_user
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        user = await get_user_by_id(conn, current_user["user_id"])
+    if not user:
+        raise HTTPException(404, "User not found")
+    return {
+        "id": str(user["id"]),
+        "name": user["name"],
+        "role_id": user["role_id"],
+    }
 
 
 
