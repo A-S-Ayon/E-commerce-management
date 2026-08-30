@@ -6,6 +6,7 @@ from app.db import init_db_pool, close_db_pool
 from app.analytics.routes import router as analytics_router
 
 from app.db import init_db_pool, close_db_pool, init_support_checkpointer, close_support_checkpointer
+from app.support.routes import router as support_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,6 +46,7 @@ from app.reviews.routes import router as reviews_router
 from app.wishlist.routes import router as wishlist_router
 from app.support.routes import router as support_router
 
+app.include_router(support_router)
 app.include_router(support_router)
 app.include_router(auth_router)
 app.include_router(categories_router)
