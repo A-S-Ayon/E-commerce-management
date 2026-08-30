@@ -3,11 +3,12 @@ import random
 import secrets
 from datetime import datetime, timedelta, timezone
 
+
+
 async def get_user_by_id(conn: asyncpg.Connection, user_id: str):
     return await conn.fetchrow(
         "SELECT id, name, email, role_id FROM shop_users WHERE id = $1", user_id
     )
-
 
 async def create_password_reset(conn: asyncpg.Connection, user_id: str) -> str:
     token = secrets.token_urlsafe(32)
