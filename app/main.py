@@ -58,4 +58,3 @@ app.include_router(addresses_router)
 app.include_router(reviews_router)
 app.include_router(wishlist_router)
 app.include_router(analytics_router)
-
