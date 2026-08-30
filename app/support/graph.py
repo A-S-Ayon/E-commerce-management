@@ -1,51 +1,52 @@
+from fastapi import APIRouter, Depends
+from langchain_core.messages import HumanMessage
+from app.auth.dependencies import get_current_user
+from app.db import get_support_checkpointer
+from app.support.graph import build_graph_for_user
+from app.support.schemas import ChatRequest, ChatResponse
 import os
 from langchain_fireworks import ChatFireworks
-from langchain_core.messages import SystemMessage
-from langgraph.graph import StateGraph, MessagesState, START
-from langgraph.prebuilt import ToolNode, tools_condition
-from app.support.tools import make_tools_for_user
-from dotenv import load_dotenv
-load_dotenv()
+
+router = APIRouter(prefix="/support", tags=["support"])
 
 
-SYSTEM = """
-You are a helpful shopping assistant for an authenticated customer.
+@router.post("/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest, current_user: dict = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    checkpointer = get_support_checkpointer()
 
-Use the appropriate tool whenever real customer/store data is needed:
-- Orders: get_my_orders, get_order_detail
-- Wallet: get_my_wallet_balance
-- Cart: view_cart, add_to_cart
-- Products: check_product_availability
-- Policies: search_documents
-- Cancellation: get_order_detail → ask confirmation → cancel_order
+    graph_app = build_graph_for_user(user_id, checkpointer)
 
-Never invent or guess data. Do not ask for identity verification.
-Only add items when explicitly requested.
-Only cancel after explicit confirmation.
-For general conversation, respond normally.
-"""
-
-
-
-
-def build_graph_for_user(user_id: str, checkpointer):
-    tools = make_tools_for_user(user_id)
-    model = llm = ChatFireworks(
-    api_key=os.getenv("FIREWORKS_API_KEY"),
-    model="accounts/fireworks/models/glm-5p2",
-    timeout=30,
+    config = {"configurable": {"thread_id": user_id}}
+    result = await graph_app.ainvoke(
+        {"messages": [HumanMessage(content=payload.message)]},
+        config=config,
     )
-    model_with_tools = model.bind_tools(tools)
-    async def call_model(state: MessagesState):
-        messages = [SystemMessage(content=SYSTEM), *state["messages"]]
-        response = await model_with_tools.ainvoke(messages)
-        return {"messages": [response]}
 
-    graph = StateGraph(MessagesState)
-    graph.add_node("agent", call_model)
-    graph.add_node("tools", ToolNode(tools))
-    graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", tools_condition)
-    graph.add_edge("tools", "agent")
+    reply = result["messages"][-1].content
+    return ChatResponse(reply=reply)
 
-    return graph.compile(checkpointer=checkpointer)
+
+@router.get("/test-fireworks")
+async def test_fireworks():
+    api_key = os.getenv("FIREWORKS_API_KEY")
+
+    print("=== FIREWORKS TEST ===")
+    print("Key exists:", bool(api_key))
+    print("Key length:", len(api_key) if api_key else 0)
+    print("Key prefix:", api_key[:8] if api_key else None)
+
+    llm = ChatFireworks(
+        api_key=api_key,
+        model="accounts/fireworks/models/glm-5p2",
+        timeout=30,
+    )
+
+    response = await llm.ainvoke(
+        "What is the capital of France?"
+    )
+
+    return {
+        "success": True,
+        "response": response.content,
+    }
