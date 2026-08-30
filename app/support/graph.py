@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends
 from langchain_core.messages import HumanMessage
 from app.auth.dependencies import get_current_user
 from app.db import get_support_checkpointer
-from app.support.graph import build_graph_for_user
 from app.support.schemas import ChatRequest, ChatResponse
 import os
 from langchain_fireworks import ChatFireworks
