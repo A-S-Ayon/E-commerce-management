@@ -2,8 +2,8 @@
 
 A full-stack e-commerce platform built to demonstrate database design and backend engineering fundamentals — no ORM, hand-written SQL throughout, with a transactional checkout system that uses row-level locking to guarantee correctness under concurrent load.
 
-**Live demo:** [ecommerce-frontend-zeta-lime.vercel.app](https://frontend-shop-mauve.vercel.app/index.html)
-**API docs (Swagger):** `<your-render-url>/docs`
+**Live demo:** [ecommerce-frontend-zeta-lime.vercel.app]()
+**API docs (Swagger):** `https://frontend-shop-mauve.vercel.app/index.html`
 
 ---
 
