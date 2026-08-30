@@ -25,13 +25,15 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
+   allow_origins=[
     "http://127.0.0.1:5500",
     "http://localhost:5500",
+    "http://localhost:8000",          # ← add if you use python http.server
+    "http://127.0.0.1:8000",          # ← and its 127.0.0.1 twin
     "https://frontend-shop-mauve.vercel.app",
-    
     "https://3000-ipyd9rbapz9vqtoizhoug-e611ea41.us4.manus.computer",
-    ],
+       "https://ecomfront-5269nma3.manus.space"
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
