@@ -29,6 +29,7 @@ app.add_middleware(
     "http://127.0.0.1:5500",
     "http://localhost:5500",
     "https://frontend-shop-mauve.vercel.app",
+    
     "https://3000-ipyd9rbapz9vqtoizhoug-e611ea41.us4.manus.computer",
     ],
     allow_credentials=True,
