@@ -1,4 +1,4 @@
-# ShopX — E-Commerce Backend
+# Shopify — E-Commerce Backend
 
 A full-featured e-commerce backend built with FastAPI and raw SQL (no ORM) on top of PostgreSQL. The database is designed around real relational integrity — foreign keys, constraints, stored procedures, and triggers — rather than delegating that logic to the application layer. The centerpiece is a `checkout()` stored procedure that runs stock validation, wallet debit, order creation, and cart clearing inside a single atomic transaction with row-level locking, so concurrent checkouts on limited stock cannot oversell or double-charge.
 
